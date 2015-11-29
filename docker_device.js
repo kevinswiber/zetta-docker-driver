@@ -4,40 +4,56 @@ var Device = require('zetta-device');
 var DockerDevice = module.exports = function(obj) {
   Device.call(this);
 
+  this.containerId = obj.id;
+
   this._name = obj.name;
   this._stats = obj.stats;
 
-  this.containerId = obj.id;
+  this.memoryLimit = this._stats.memory_stats.limit;
 
-  this.cpuPercentage = null;
+  this._cpuPercentageStream = null;
 
-  this.memoryPercentage = null;
-  this.memoryUsage = null;
-  this.memoryLimit = null;
-  this.memoryWorkingSet = null;
+  this._memoryPercentageStream = null;
+  this._memoryUsageStream = null;
+  this._memoryWorkingSetStream = null;
 
-  this.networkRxBytes = null;
-  this.networkTxBytes = null;
-  this.networkRxErrors = null;
-  this.networkTxErrors = null;
-
-  this._calculate();
+  this._networkRxBytesStream = null;
+  this._networkTxBytesStream = null;
+  this._networkRxErrorsStream = null;
+  this._networkTxErrorsStream = null;
 };
 util.inherits(DockerDevice, Device);
 
 DockerDevice.prototype.init = function(config) {
+  var self = this;
+
   config
     .type('container')
     .name(this._name)
-    .monitor('cpuPercentage')
-    .monitor('memoryPercentage')
-    .monitor('memoryUsage')
-    .monitor('memoryLimit')
-    .monitor('memoryWorkingSet')
-    .monitor('networkRxBytes')
-    .monitor('networkTxBytes')
-    .monitor('networkRxErrors')
-    .monitor('networkTxErrors');
+    .stream('cpu.percentage', function(stream) {
+      self._cpuPercentageStream = stream;
+    })
+    .stream('memory.percentage', function(stream) {
+      self._memoryPercentageStream = stream;
+    })
+    .stream('memory.usage', function(stream) {
+      self._memoryUsageStream = stream;
+    })
+    .stream('memory.workingSet', function(stream) {
+      self._memoryWorkingSetStream = stream;
+    })
+    .stream('network.rxBytes', function(stream) {
+      self._networkRxBytesStream = stream;
+    })
+    .stream('network.txBytes', function(stream) {
+      self._networkTxBytesStream = stream;
+    })
+    .stream('network.rxErrors', function(stream) {
+      self._networkRxErrorsStream = stream;
+    })
+    .stream('network.txErrors', function(stream) {
+      self._networkTxErrorsStream = stream;
+    });
 };
 
 DockerDevice.prototype.update = function(obj) {
@@ -46,8 +62,11 @@ DockerDevice.prototype.update = function(obj) {
 };
 
 DockerDevice.prototype._calculate = function() {
-  this.memoryUsage = this._stats.memory_stats.usage;
-  this.memoryLimit = this._stats.memory_stats.limit;
+  var memoryUsage = this._stats.memory_stats.usage;
+  var memoryLimit = this._stats.memory_stats.limit;
+
+  this._memoryUsageStream.write(memoryUsage);
+  this.memoryLimit = memoryLimit;
 
   var preCpuTotal = this._stats.precpu_stats.cpu_usage.total_usage;
   var cpuTotal = this._stats.cpu_stats.cpu_usage.total_usage;
@@ -63,17 +82,17 @@ DockerDevice.prototype._calculate = function() {
       this._stats.cpu_stats.cpu_usage.percpu_usage.length * 100.0;
   }
 
-  this.cpuPercentage = cpuPercent;
+  this._cpuPercentageStream.write(cpuPercent);
 
   var memoryPercent = 0;
 
-  if (this.memoryLimit > 0) {
-    memoryPercent = this.memoryUsage / this.memoryLimit * 100;
+  if (memoryLimit > 0) {
+    memoryPercent = memoryUsage / memoryLimit * 100;
   }
 
-  this.memoryPercentage = memoryPercent;
+  this._memoryPercentageStream.write(memoryPercent);
 
-  var workingSet = this.memoryUsage;
+  var workingSet = memoryUsage;
   var inactiveAnon = this._stats.memory_stats.stats.total_inactive_anon || 0;
   if (workingSet < inactiveAnon) {
     workingSet = 0;
@@ -88,10 +107,10 @@ DockerDevice.prototype._calculate = function() {
     workingSet -= inactiveFile;
   }
 
-  this.memoryWorkingSet = workingSet;
+  this._memoryWorkingSetStream.write(workingSet);
 
-  this.networkRxBytes = this._stats.network.rx_bytes;
-  this.networkTxBytes = this._stats.network.tx_bytes;
-  this.networkRxErrors = this._stats.network.rx_errors;
-  this.networkTxErrors = this._stats.network.tx_errors;
+  this._networkRxBytesStream.write(this._stats.network.rx_bytes);
+  this._networkTxBytesStream.write(this._stats.network.tx_bytes);
+  this._networkRxErrorsStream.write(this._stats.network.rx_errors);
+  this._networkTxErrorsStream.write(this._stats.network.tx_errors);
 };

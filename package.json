@@ -23,5 +23,13 @@
     "monitor"
   ],
   "author": "Kevin Swiber <kswiber@gmail.com>",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kevinswiber/zetta-docker-driver.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kevinswiber/zetta-docker-driver/issues"
+  },
+  "homepage": "https://github.com/kevinswiber/zetta-docker-driver#readme"
 }

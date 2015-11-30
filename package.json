@@ -1,0 +1,27 @@
+{
+  "name": "zetta-docker-driver",
+  "version": "0.1.0",
+  "description": "Monitor Docker containers as Zetta devices.",
+  "main": "docker_scout.js",
+  "dependencies": {
+    "docker-stats": "^0.5.0",
+    "dockerode": "^2.2.6",
+    "zetta": "^0.33.0",
+    "through2": "^2.0.0",
+    "zetta-device": "^0.17.0",
+    "zetta-scout": "^0.6.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [
+    "zetta",
+    "docker",
+    "containers",
+    "monitor"
+  ],
+  "author": "Kevin Swiber <kswiber@gmail.com>",
+  "license": "MIT"
+}

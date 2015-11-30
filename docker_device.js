@@ -5,11 +5,21 @@ var DockerDevice = module.exports = function(obj) {
   Device.call(this);
 
   this.containerId = obj.id;
+  this.processes = [];
 
   this._name = obj.name;
   this._stats = obj.stats;
 
-  this.memoryLimit = this._stats.memory_stats.limit;
+  this.cpu = {
+    percentage: this._calculateCpuPercent()
+  };
+
+  this.memory = {
+    usage: this._stats.memory_stats.usage,
+    limit: this._stats.memory_stats.limit,
+    percentage: this._calculateMemoryPercent(),
+    workingSet: this._calculateMemoryWorkingSet()
+  };
 
   this._cpuPercentageStream = null;
 
@@ -75,49 +85,16 @@ DockerDevice.prototype._calculate = function() {
   var memoryUsage = this._stats.memory_stats.usage;
   var memoryLimit = this._stats.memory_stats.limit;
 
+  this.memory.usage = memoryUsage;
   this._memoryUsageStream.write(memoryUsage);
-  this.memoryLimit = memoryLimit;
 
-  var preCpuTotal = this._stats.precpu_stats.cpu_usage.total_usage;
-  var cpuTotal = this._stats.cpu_stats.cpu_usage.total_usage;
-  var preCpuSystem = this._stats.precpu_stats.system_cpu_usage;
-  var cpuSystem = this._stats.cpu_stats.system_cpu_usage;
+  this.cpu.percentage = this._calculateCpuPercent();
+  this._cpuPercentageStream.write(this.cpu.percentage);
 
-  var totalDelta = cpuTotal - preCpuTotal;
-  var systemDelta = cpuSystem - preCpuSystem;
-
-  var cpuPercent = 0.0;
-  if (totalDelta > 0.0 && systemDelta > 0.0) {
-    cpuPercent = (totalDelta / systemDelta) *
-      this._stats.cpu_stats.cpu_usage.percpu_usage.length * 100.0;
-  }
-
-  this._cpuPercentageStream.write(cpuPercent);
-
-  var memoryPercent = 0;
-
-  if (memoryLimit > 0) {
-    memoryPercent = memoryUsage / memoryLimit * 100;
-  }
-
-  this._memoryPercentageStream.write(memoryPercent);
-
-  var workingSet = memoryUsage;
-  var inactiveAnon = this._stats.memory_stats.stats.total_inactive_anon || 0;
-  if (workingSet < inactiveAnon) {
-    workingSet = 0;
-  } else {
-    workingSet -= inactiveAnon;
-  }
-
-  var inactiveFile = this._stats.memory_stats.stats.total_inactive_file || 0;
-  if (workingSet < inactiveFile) {
-    workingSet = 0;
-  } else {
-    workingSet -= inactiveFile;
-  }
-
-  this._memoryWorkingSetStream.write(workingSet);
+  this.memory.percentage = this._calculateMemoryPercent();
+  this._memoryPercentageStream.write(this.memory.percentage);
+  this.memory.workingSet = this._calculateMemoryWorkingSet();
+  this._memoryWorkingSetStream.write(this.memory.workingSet);
 
   var newRxBytes = this._stats.network.rx_bytes;
   var newTxBytes = this._stats.network.tx_bytes;
@@ -138,4 +115,54 @@ DockerDevice.prototype._calculate = function() {
   this.networks.eth0.txBytes = this._stats.network.tx_bytes;
   this.networks.eth0.rxErrors = this._stats.network.rx_errors;
   this.networks.eth0.txErrors = this._stats.network.tx_errors;
+};
+
+DockerDevice.prototype._calculateMemoryPercent = function() {
+  var memoryUsage = this._stats.memory_stats.usage;
+  var memoryLimit = this._stats.memory_stats.limit;
+
+  var memoryPercent = 0;
+
+  if (memoryLimit > 0) {
+    memoryPercent = memoryUsage / memoryLimit * 100;
+  }
+
+  return memoryPercent;
+};
+
+DockerDevice.prototype._calculateMemoryWorkingSet = function() {
+  var workingSet = this._stats.memory_stats.usage;
+  var inactiveAnon = this._stats.memory_stats.stats.total_inactive_anon || 0;
+  if (workingSet < inactiveAnon) {
+    workingSet = 0;
+  } else {
+    workingSet -= inactiveAnon;
+  }
+
+  var inactiveFile = this._stats.memory_stats.stats.total_inactive_file || 0;
+  if (workingSet < inactiveFile) {
+    workingSet = 0;
+  } else {
+    workingSet -= inactiveFile;
+  }
+
+  return workingSet;
+};
+
+DockerDevice.prototype._calculateCpuPercent = function() {
+  var preCpuTotal = this._stats.precpu_stats.cpu_usage.total_usage;
+  var cpuTotal = this._stats.cpu_stats.cpu_usage.total_usage;
+  var preCpuSystem = this._stats.precpu_stats.system_cpu_usage;
+  var cpuSystem = this._stats.cpu_stats.system_cpu_usage;
+
+  var totalDelta = cpuTotal - preCpuTotal;
+  var systemDelta = cpuSystem - preCpuSystem;
+
+  var cpuPercent = 0.0;
+  if (totalDelta > 0.0 && systemDelta > 0.0) {
+    cpuPercent = (totalDelta / systemDelta) *
+      this._stats.cpu_stats.cpu_usage.percpu_usage.length * 100.0;
+  }
+
+  return cpuPercent;
 };

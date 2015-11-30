@@ -1,6 +1,7 @@
 # zetta-docker-driver
 
 * Monitor Docker containers as Zetta devices
+* Supports Docker 1.7 with plans for updated version support
 
 ## Install
 

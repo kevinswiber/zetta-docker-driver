@@ -17,10 +17,20 @@ var DockerDevice = module.exports = function(obj) {
   this._memoryUsageStream = null;
   this._memoryWorkingSetStream = null;
 
-  this._networkRxBytesStream = null;
-  this._networkTxBytesStream = null;
-  this._networkRxErrorsStream = null;
-  this._networkTxErrorsStream = null;
+  // Default networks to eth0 until support for Docker 1.8/1.9
+  this.networks = {
+    'eth0': {
+      rxBytes: this._stats.network.rx_bytes,
+      txBytes: this._stats.network.tx_bytes,
+      rxErrors: this._stats.network.rx_errors,
+      txErrors: this._stats.network.tx_errors
+    }
+  };
+
+  this._networkEth0RxBytesStream = null;
+  this._networkEth0TxBytesStream = null;
+  this._networkEth0RxErrorsStream = null;
+  this._networkEth0TxErrorsStream = null;
 };
 util.inherits(DockerDevice, Device);
 
@@ -42,17 +52,17 @@ DockerDevice.prototype.init = function(config) {
     .stream('memory.workingSet', function(stream) {
       self._memoryWorkingSetStream = stream;
     })
-    .stream('network.rxBytes', function(stream) {
-      self._networkRxBytesStream = stream;
+    .stream('networks.eth0.rxBytesPerSecond', function(stream) {
+      self._networkEth0RxBytesStream = stream;
     })
-    .stream('network.txBytes', function(stream) {
-      self._networkTxBytesStream = stream;
+    .stream('networks.eth0.txBytesPerSecond', function(stream) {
+      self._networkEth0TxBytesStream = stream;
     })
-    .stream('network.rxErrors', function(stream) {
-      self._networkRxErrorsStream = stream;
+    .stream('networks.eth0.rxErrorsPerSecond', function(stream) {
+      self._networkEth0RxErrorsStream = stream;
     })
-    .stream('network.txErrors', function(stream) {
-      self._networkTxErrorsStream = stream;
+    .stream('networks.eth0.txErrorsPerSecond', function(stream) {
+      self._networkEth0TxErrorsStream = stream;
     });
 };
 
@@ -109,8 +119,23 @@ DockerDevice.prototype._calculate = function() {
 
   this._memoryWorkingSetStream.write(workingSet);
 
-  this._networkRxBytesStream.write(this._stats.network.rx_bytes);
-  this._networkTxBytesStream.write(this._stats.network.tx_bytes);
-  this._networkRxErrorsStream.write(this._stats.network.rx_errors);
-  this._networkTxErrorsStream.write(this._stats.network.tx_errors);
+  var newRxBytes = this._stats.network.rx_bytes;
+  var newTxBytes = this._stats.network.tx_bytes;
+  var newRxErrors = this._stats.network.rx_errors;
+  var newTxErrors = this._stats.network.tx_errors;
+
+  var rxBytesDiff = newRxBytes - this.networks.eth0.rxBytes;
+  var txBytesDiff = newTxBytes - this.networks.eth0.txBytes;
+  var rxErrorsDiff = newRxErrors - this.networks.eth0.rxErrors;
+  var txErrorsDiff = newTxErrors - this.networks.eth0.txErrors;
+
+  this._networkEth0RxBytesStream.write(rxBytesDiff);
+  this._networkEth0TxBytesStream.write(txBytesDiff);
+  this._networkEth0RxErrorsStream.write(rxErrorsDiff);
+  this._networkEth0TxErrorsStream.write(txErrorsDiff);
+
+  this.networks.eth0.rxBytes = this._stats.network.rx_bytes;
+  this.networks.eth0.txBytes = this._stats.network.tx_bytes;
+  this.networks.eth0.rxErrors = this._stats.network.rx_errors;
+  this.networks.eth0.txErrors = this._stats.network.tx_errors;
 };

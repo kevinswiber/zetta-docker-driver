@@ -11,7 +11,13 @@ var DockerDevice = module.exports = function(obj) {
   this._stats = obj.stats;
 
   this.cpu = {
-    percentage: this._calculateCpuPercent()
+    percentage: this._calculateCpuPercent(),
+    usage: {
+      total: this._stats.cpu_stats.cpu_usage.total_usage,
+      kernel: this._stats.cpu_stats.cpu_usage.usage_in_kernelmode,
+      user: this._stats.cpu_stats.cpu_usage.usage_in_usermode,
+      cores: this._stats.cpu_stats.cpu_usage.percpu_usage
+    }
   };
 
   this.memory = {
@@ -21,6 +27,10 @@ var DockerDevice = module.exports = function(obj) {
     workingSet: this._calculateMemoryWorkingSet()
   };
 
+  this._cpuTotalUsageStream = null;
+  this._cpuKernelUsageStream = null;
+  this._cpuUserUsageStream = null;
+  this._cpuPerCoreUsageStreams = [];
   this._cpuPercentageStream = null;
 
   this._memoryPercentageStream = null;
@@ -50,6 +60,23 @@ DockerDevice.prototype.init = function(config) {
   config
     .type('container')
     .name(this._name)
+    .stream('cpu.usagePerSecond', function(stream) {
+      self._cpuTotalUsageStream = stream;
+    });
+
+  for (var i = 0; i < this.cpu.usage.cores.length; i++) {
+    config.stream('cpu.core' + i + '.usagePerSecond', function(stream) {
+      self._cpuPerCoreUsageStreams.push(stream);
+    });
+  }
+
+  config
+    .stream('cpu.kernel.usagePerSecond', function(stream) {
+      self._cpuKernelUsageStream = stream;
+    })
+    .stream('cpu.user.usagePerSecond', function(stream) {
+      self._cpuUserUsageStream = stream;
+    })
     .stream('cpu.percentage', function(stream) {
       self._cpuPercentageStream = stream;
     })
@@ -88,11 +115,25 @@ DockerDevice.prototype._calculate = function() {
   this.memory.usage = memoryUsage;
   this._memoryUsageStream.write(memoryUsage);
 
+  this.cpu.usage.total = this._stats.cpu_stats.cpu_usage.total_usage;
+  this.cpu.usage.kernel = this._stats.cpu_stats.cpu_usage.usage_in_kernelmode;
+  this.cpu.usage.user = this._stats.cpu_stats.cpu_usage.usage_in_usermode;
+
+  this._cpuTotalUsageStream.write(this._calculateCpuTotalUsage());
+  this._cpuKernelUsageStream.write(this._calculateCpuKernelUsage());
+  this._cpuUserUsageStream.write(this._calculateCpuUserUsage());
+
+  this.cpu.usage.cores = this._stats.cpu_stats.cpu_usage.percpu_usage;
+  for (var i = 0; i < this.cpu.usage.cores.length; i++) {
+    this._cpuPerCoreUsageStreams[i].write(this._calculatePerCoreUsage(i));
+  }
+
   this.cpu.percentage = this._calculateCpuPercent();
   this._cpuPercentageStream.write(this.cpu.percentage);
 
   this.memory.percentage = this._calculateMemoryPercent();
   this._memoryPercentageStream.write(this.memory.percentage);
+
   this.memory.workingSet = this._calculateMemoryWorkingSet();
   this._memoryWorkingSetStream.write(this.memory.workingSet);
 
@@ -165,4 +206,40 @@ DockerDevice.prototype._calculateCpuPercent = function() {
   }
 
   return cpuPercent;
+};
+
+DockerDevice.prototype._calculateCpuTotalUsage = function() {
+  var preCpuTotal = this._stats.precpu_stats.cpu_usage.total_usage;
+  var cpuTotal = this._stats.cpu_stats.cpu_usage.total_usage;
+
+  var delta = cpuTotal - preCpuTotal;
+
+  return delta / 1e+9;
+};
+
+DockerDevice.prototype._calculateCpuKernelUsage = function() {
+  var preCpuKernel = this._stats.precpu_stats.cpu_usage.usage_in_kernelmode;
+  var cpuKernel = this._stats.cpu_stats.cpu_usage.usage_in_kernelmode;
+
+  var delta = cpuKernel - preCpuKernel;
+
+  return delta / 1e+9;
+};
+
+DockerDevice.prototype._calculateCpuUserUsage = function() {
+  var preCpuUser = this._stats.precpu_stats.cpu_usage.usage_in_usermode;
+  var cpuUser = this._stats.cpu_stats.cpu_usage.usage_in_usermode;
+
+  var delta = cpuUser - preCpuUser;
+
+  return delta / 1e+9;
+};
+
+DockerDevice.prototype._calculatePerCoreUsage = function(index) {
+  var prePerCoreUsage = this._stats.precpu_stats.cpu_usage.percpu_usage[index];
+  var perCoreUsage = this._stats.cpu_stats.cpu_usage.percpu_usage[index];
+
+  var delta = perCoreUsage - prePerCoreUsage;
+
+  return delta / 1e+9;
 };

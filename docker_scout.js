@@ -4,6 +4,7 @@ var Scout = require('zetta-scout');
 var stats = require('docker-stats')
 var through = require('through2');
 var DockerDevice = require('./docker_device');
+var DockerHost = require('./docker_host');
 
 var DockerScout = module.exports = function() {
   this._containers = {};
@@ -19,6 +20,18 @@ DockerScout.prototype.init = function(next) {
     'cpuPercentage', 'memoryPercentage', 'rss',
     'virtualSize', 'status', 'runningTime', 'command'
   ];
+  var psArgs = '-e -o user,pid,ppid,stime,pcpu,pmem,rss,vsz,stat,time,comm';
+
+  var hostQuery = this.server.where({ type: 'host' });
+  this.server.find(hostQuery, function(err, result) {
+    if (!result.length) {
+      self.discover(DockerHost);
+      return;
+    }
+
+    result = result[0];
+    self.provision(result, DockerHost);
+  });
 
   setInterval(function() {
     docker.listContainers(function(err, containerInfos) {
@@ -34,7 +47,7 @@ DockerScout.prototype.init = function(next) {
         }
         var container = docker.getContainer(containerInfo.Id);
         var opts = {
-          ps_args: '-e -o user,pid,ppid,stime,pcpu,pmem,rss,vsz,stat,time,comm'
+          ps_args: psArgs
         };
 
         container.top(opts, function(err, data) {
@@ -54,8 +67,9 @@ DockerScout.prototype.init = function(next) {
 
   stats({ statsinterval: 1 }).pipe(through.obj(function(chunk, enc, cb) {
     if (Object.keys(self._containers).indexOf(chunk.id) === -1) {
-      var query = self.server.where({ type: 'container', containerId: chunk.id });
-      self.server.find(query, function(err, result) {
+      var containerQuery =
+        self.server.where({ type: 'container', containerId: chunk.id });
+      self.server.find(containerQuery, function(err, result) {
         if (!result.length) {
           var machine = self.discover(DockerDevice, chunk);
           self._containers[chunk.id] = machine;

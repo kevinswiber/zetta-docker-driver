@@ -10,6 +10,8 @@ var DockerHost = module.exports = function() {
   this.cpu = {
     usage: {
       total: 0,
+      kernel: 0,
+      user: 0,
       cores: [],
     },
     percentage: 0
@@ -97,7 +99,7 @@ DockerHost.prototype.init = function(config) {
 DockerHost.prototype._calculate = function() {
   this.hostname = os.hostname();
 
-  var cpuTotalUsage = this._calculateCpuTotalUsage();
+  /*var cpuTotalUsage = this._calculateCpuTotalUsage();
   if (this.cpu.usage.total > 0) {
     var delta = cpuTotalUsage - this.cpu.usage.total;
     this._cpuTotalUsageStream.write(delta / 1e+4);
@@ -112,7 +114,7 @@ DockerHost.prototype._calculate = function() {
     for (var i = 0; i < os.cpus().length; i++) {
       this._cpuPerCoreUsageStreams[i].write(this._calculatePerCoreUsage(newCpuCores, i));
     }
-  }
+  }*/
 
   if (this._lastCpuAverage) {
     this.cpu.percentage = this._calculateCpuPercent();
@@ -122,9 +124,9 @@ DockerHost.prototype._calculate = function() {
     this._lastCpuAverage = cpuAverage();
   }
 
-  this.cpu.usage.cores = newCpuCores;
+  //this.cpu.usage.cores = newCpuCores;
 
-  this.cpu.usage.total = this._calculateCpuTotalUsage();
+  //this.cpu.usage.total = this._calculateCpuTotalUsage();
 
   this.memory = {
     usage: os.totalmem() - os.freemem(),
@@ -143,6 +145,7 @@ DockerHost.prototype._calculate = function() {
   this.platform = os.platform();
   this.architecture = os.arch();
 
+  this._calculateCpuStats();
   this._calculateNetworkStats();
 };
 
@@ -155,7 +158,7 @@ DockerHost.prototype._calculateCpuTotalUsage = function() {
 DockerHost.prototype._calculatePerCoreUsage = function(newCpuCores, index) {
   var oldCpuCore = this.cpu.usage.cores[index];
   var delta = newCpuCores[index] - oldCpuCore;
-  return delta / 1e+4;
+  return delta / 1e+9;
 };
 
 DockerHost.prototype._calculateCpuPercent = function() {
@@ -164,6 +167,65 @@ DockerHost.prototype._calculateCpuPercent = function() {
   var totalDelta = newAverage.total - this._lastCpuAverage.total;
 
   return 100.0 - (100.0 * idleDelta / totalDelta);
+};
+
+DockerHost.prototype._calculateCpuStats = function() {
+  var self = this;
+
+  var rootDir = '/sys/fs/cgroup/cpu';
+
+  fs.readFile(rootDir + '/cpuacct.stat', function(err, data) {
+    if (err || !data) {
+      return;
+    }
+
+    var lines = data.toString().split('\n');
+    lines.pop();
+
+    lines.forEach(function(line) {
+      var words = line.split(/\s+/);
+
+      var value = padRight(words[1], 13, '0');
+
+      if (words[0] === 'user') {
+        self.cpu.usage.user = parseFloat(value);
+      } else  if (words[0] === 'system') {
+        self.cpu.usage.kernel = parseFloat(value);
+      }
+    });
+  });
+
+  fs.readFile(rootDir + '/cpuacct.usage', function(err, data) {
+    if (err || !data) {
+      return;
+    }
+
+    var value = data.toString().split('\n')[0];
+    value = parseFloat(padRight(value, 13, '0'));
+
+    if (self.cpu.usage.total > 0) {
+      var delta = value - self.cpu.usage.total;
+      self._cpuTotalUsageStream.write(delta / 1e+9);
+    }
+
+    self.cpu.usage.total = value;
+  });
+
+  fs.readFile(rootDir + '/cpuacct.usage_percpu', function(err, data) {
+    if (err || !data) {
+      return;
+    }
+
+    var lines = data.toString().split('\n');
+    lines.pop();
+    lines = lines.map(parseFloat);
+
+    for (var i = 0; i < lines.length; i++) {
+      self._cpuPerCoreUsageStreams[i].write(self._calculatePerCoreUsage(lines, i));
+    }
+
+    self.cpu.usage.cores = lines;
+  });
 };
 
 DockerHost.prototype._calculateNetworkStats = function() {
@@ -255,4 +317,17 @@ function cpuAverage() {
 
   //Return the average Idle and Tick times
   return {idle: totalIdle / cpus.length,  total: totalTick / cpus.length};
+}
+
+function padRight(string, desiredLength, filler) {
+  var str = string;
+
+  if (str.length < desiredLength) {
+    var diff = desiredLength - str.length;
+    for (var i = 0; i < diff; i++) {
+      str += filler;
+    }
+  }
+
+  return str;
 }

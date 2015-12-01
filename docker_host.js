@@ -1,3 +1,4 @@
+var fs = require('fs');
 var os = require('os');
 var util = require('util');
 var Device = require('zetta-device');
@@ -20,7 +21,7 @@ var DockerHost = module.exports = function() {
     percentage: 0 
   };
 
-  this.networks = [];
+  this.networks = {};
 
   this.platform = null;
   this.architecture = null;
@@ -31,6 +32,8 @@ var DockerHost = module.exports = function() {
 
   this._memoryPercentageStream = null;
   this._memoryUsageStream = null;
+
+  this._networkStreams = {};
 
   this._lastCpuAverage = null;
 };
@@ -64,6 +67,28 @@ DockerHost.prototype.init = function(config) {
     .stream('memory.usage', function(stream) {
       self._memoryUsageStream = stream;
     });
+
+  var regex = /^(?!veth|docker|lo).*/;
+  fs.readdirSync('/sys/class/net').filter(function(dir) {
+    return regex.test(dir);
+  }).forEach(function(interfaceName) {
+    self.networks[interfaceName] = {};
+  });
+
+  var networkStreamNames = ['rxBytesPerSecond', 'txBytesPerSecond',
+      'rxErrorsPerSecond', 'txErrorsPerSecond'];
+
+  Object.keys(this.networks).forEach(function(key) {
+    networkStreamNames.forEach(function(streamName) {
+      if (!self._networkStreams.hasOwnProperty(key)) {
+        self._networkStreams[key] = {};
+      }
+
+      config.stream('networks.' + key + '.' + streamName, function(stream) {
+        self._networkStreams[key][streamName] = stream;
+      });
+    });
+  });
 
   this._calculate();
   setInterval(this._calculate.bind(this), 1000);
@@ -117,6 +142,8 @@ DockerHost.prototype._calculate = function() {
 
   this.platform = os.platform();
   this.architecture = os.arch();
+
+  this._calculateNetworkStats();
 };
 
 DockerHost.prototype._calculateCpuTotalUsage = function() {
@@ -137,6 +164,70 @@ DockerHost.prototype._calculateCpuPercent = function() {
   var totalDelta = newAverage.total - this._lastCpuAverage.total;
 
   return 100.0 - (100.0 * idleDelta / totalDelta);
+};
+
+DockerHost.prototype._calculateNetworkStats = function() {
+  var self = this;
+
+  var networkNames = Object.keys(this.networks);
+
+  if (!networkNames.length) {
+    this.networks = {};
+    return;
+  }
+
+  networkNames.forEach(function(name) {
+    if (!self.networks.hasOwnProperty(name)) {
+      self.networks[name] = {
+        rxBytes: 0,
+        txBytes: 0,
+        rxErrors: 0,
+        txErrors: 0
+      };
+    }
+
+    var netDir = '/sys/class/net/' + name + '/statistics';
+
+    fs.readFile(netDir + '/rx_bytes', function(err, data) {
+      if (!err && data) {
+        var oldData = self.networks[name].rxBytes;
+        var newData = data.toString().slice(0, -1);
+        var delta = newData - oldData;
+        self.networks[name].rxBytes = newData;
+        self._networkStreams[name]['rxBytesPerSecond'].write(delta);
+      }
+    });
+
+    fs.readFile(netDir + '/tx_bytes', function(err, data) {
+      if (!err && data) {
+        var oldData = self.networks[name].txBytes;
+        var newData = data.toString().slice(0, -1);
+        var delta = newData - oldData;
+        self.networks[name].txBytes = newData;
+        self._networkStreams[name]['txBytesPerSecond'].write(delta);
+      }
+    });
+
+    fs.readFile(netDir + '/rx_errors', function(err, data) {
+      if (!err && data) {
+        var oldData = self.networks[name].rxErrors;
+        var newData = data.toString().slice(0, -1);
+        var delta = newData - oldData;
+        self.networks[name].rxErrors = newData;
+        self._networkStreams[name]['rxErrorsPerSecond'].write(delta);
+      }
+    });
+
+    fs.readFile(netDir + '/tx_errors', function(err, data) {
+      if (!err && data) {
+        var oldData = self.networks[name].txErrors;
+        var newData = data.toString().slice(0, -1);
+        var delta = newData - oldData;
+        self.networks[name].txErrors = newData;
+        self._networkStreams[name]['txErrorsPerSecond'].write(delta);
+      }
+    });
+  });
 };
 
 // From gist: https://gist.github.com/bag-man/5570809

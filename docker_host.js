@@ -20,7 +20,8 @@ var DockerHost = module.exports = function() {
   this.memory = {
     usage: 0,
     limit: 0,
-    percentage: 0 
+    percentage: 0,
+    workingSet: 0
   };
 
   this.networks = {};
@@ -34,6 +35,7 @@ var DockerHost = module.exports = function() {
 
   this._memoryPercentageStream = null;
   this._memoryUsageStream = null;
+  this._memoryWorkingSetStream = null;
 
   this._networkStreams = {};
 
@@ -68,6 +70,9 @@ DockerHost.prototype.init = function(config) {
     })
     .stream('memory.usage', function(stream) {
       self._memoryUsageStream = stream;
+    })
+    .stream('memory.workingSet', function(stream) {
+      self._memoryWorkingSetStream = stream;
     });
 
   var regex = /^(?!veth|docker|lo).*/;
@@ -99,23 +104,6 @@ DockerHost.prototype.init = function(config) {
 DockerHost.prototype._calculate = function() {
   this.hostname = os.hostname();
 
-  /*var cpuTotalUsage = this._calculateCpuTotalUsage();
-  if (this.cpu.usage.total > 0) {
-    var delta = cpuTotalUsage - this.cpu.usage.total;
-    this._cpuTotalUsageStream.write(delta / 1e+4);
-  }
-  this.cpu.usage.total = cpuTotalUsage;
-
-  var newCpuCores = os.cpus().map(function(core) {
-    return core.times.user + core.times.sys;
-  });
-
-  if (this.cpu.usage.cores.length) {
-    for (var i = 0; i < os.cpus().length; i++) {
-      this._cpuPerCoreUsageStreams[i].write(this._calculatePerCoreUsage(newCpuCores, i));
-    }
-  }*/
-
   if (this._lastCpuAverage) {
     this.cpu.percentage = this._calculateCpuPercent();
     this._cpuPercentageStream.write(this.cpu.percentage);
@@ -123,10 +111,6 @@ DockerHost.prototype._calculate = function() {
   } else {
     this._lastCpuAverage = cpuAverage();
   }
-
-  //this.cpu.usage.cores = newCpuCores;
-
-  //this.cpu.usage.total = this._calculateCpuTotalUsage();
 
   this.memory = {
     usage: os.totalmem() - os.freemem(),
@@ -146,6 +130,7 @@ DockerHost.prototype._calculate = function() {
   this.architecture = os.arch();
 
   this._calculateCpuStats();
+  this._calculateMemoryWorkingSet();
   this._calculateNetworkStats();
 };
 
@@ -289,6 +274,44 @@ DockerHost.prototype._calculateNetworkStats = function() {
         self._networkStreams[name]['txErrorsPerSecond'].write(delta);
       }
     });
+  });
+};
+
+DockerHost.prototype._calculateMemoryWorkingSet = function() {
+  var self = this;
+  var fileName = '/sys/fs/cgroup/memory/memory.stat';
+
+  fs.readFile(fileName, function(err, data) {
+    if (err || !data) {
+      return;
+    }
+
+    var lines = data.toString().split('\n');
+    lines.pop();
+
+    var obj = {};
+    lines.forEach(function(line) {
+      var words = line.split(/\s+/);
+      obj[words[0]] = words[1];
+    });
+
+    var workingSet = self.memory.usage;
+    var inactiveAnon = obj.total_inactive_anon || 0;
+    if (workingSet < inactiveAnon) {
+      workingSet = 0;
+    } else {
+      workingSet -= inactiveAnon;
+    }
+
+    var inactiveFile = obj.total_inactive_file || 0;
+    if (workingSet < inactiveFile) {
+      workingSet = 0;
+    } else {
+      workingSet -= inactiveFile;
+    }
+
+    self._memoryWorkingSetStream.write(workingSet);
+    self.memory.workingSet = workingSet;
   });
 };
 

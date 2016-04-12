@@ -1,6 +1,6 @@
 {
   "name": "zetta-docker-driver",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Monitor Docker containers as Zetta devices.",
   "main": "docker_scout.js",
   "dependencies": {
